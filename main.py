@@ -1,16 +1,10 @@
-from __future__ import annotations
-
 import logging
 import os
-
-from flask import Flask, request, jsonify
-
 import sqlalchemy
 
+from __future__ import annotations
+from flask import Flask, request, jsonify
 from connect_connector import connect_with_connector
-
-LODGINGS = 'lodgings'
-ERROR_NOT_FOUND = {'Error' : 'No lodging with this id exists'}
 
 app = Flask(__name__)
 
