@@ -134,8 +134,11 @@ def create_business():
 
     if business_result is None:
         return jsonify({'Error': 'Failed to fetch created business'}), 500
+    
+    response = format_business_response(business_result)
+    response['self'] = f"http://localhost:8080/businesses/{business_result['id']}"
 
-    return jsonify(format_business_response(business_result)), 201
+    return jsonify(response), 201
 
 if __name__ == '__main__':
     init_db()
