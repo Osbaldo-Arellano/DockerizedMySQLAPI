@@ -1,10 +1,10 @@
-import logging
-import os
-import sqlalchemy
-
 from __future__ import annotations
 from flask import Flask, request, jsonify
 from connect_connector import connect_with_connector
+
+import logging
+import os
+import sqlalchemy
 
 app = Flask(__name__)
 
@@ -142,6 +142,6 @@ def create_business():
 
 if __name__ == '__main__':
     init_db()
-    create_business_table()
-    create_review_table()
+    create_business_table(db)
+    create_review_table(db)
     app.run(host='127.0.0.1', port=8080, debug=True)
