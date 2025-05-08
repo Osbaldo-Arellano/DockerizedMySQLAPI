@@ -1,5 +1,5 @@
 from __future__ import annotations
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, url_for
 from connect_connector import connect_with_connector
 
 import logging
@@ -36,10 +36,10 @@ def create_business_table(db: sqlalchemy.engine.base.Engine) -> None:
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     owner_id INT NOT NULL,
                     name VARCHAR(255) NOT NULL,
-                    street_address VARCHAR(255),
-                    city VARCHAR(255),
-                    state VARCHAR(255),
-                    zip_code VARCHAR(10)
+                    street_address VARCHAR(255) NOT NULL,
+                    city VARCHAR(255) NOT NULL,
+                    state VARCHAR(255) NOT NULL,
+                    zip_code VARCHAR(10) NOT NULL
                 );
                 '''
             )
@@ -67,13 +67,13 @@ def create_review_table(db: sqlalchemy.engine.base.Engine) -> None:
 # Response Formatting
 def format_business_response(business_row):
     return {
-        'id': business_row['id'],
-        'owner_id': business_row['owner_id'],
-        'name': business_row['name'],
-        'street_address': business_row['street_address'],
-        'city': business_row['city'],
-        'state': business_row['state'],
-        'zip_code': business_row['zip_code']
+        "id": int(business_row["id"]),
+        "owner_id": int(business_row["owner_id"]), 
+        "name": business_row["name"],
+        "street_address": business_row["street_address"],
+        "city": business_row["city"],
+        "state": business_row["state"],
+        "zip_code": int(business_row["zip_code"]), 
     }
 
 
@@ -109,7 +109,7 @@ def create_business():
     required_fields = ['owner_id', 'name', 'street_address', 'city', 'state', 'zip_code']
     
     if not all(field in data for field in required_fields):
-        return jsonify({'Error': 'Missing required attributes'}), 400
+        return jsonify({'Error': 'The request body is missing at least one of the required attributes'}), 400
 
     insert = sqlalchemy.text(
         '''
@@ -130,14 +130,16 @@ def create_business():
         business_id = result.lastrowid
 
         row_result = conn.execute(select, {'id': business_id})
-        business_result = row_result.fetchone()
+        business_result = row_result.mappings().fetchone()
+
 
     if business_result is None:
         return jsonify({'Error': 'Failed to fetch created business'}), 500
     
     response = format_business_response(business_result)
-    response['self'] = f"http://localhost:8080/businesses/{business_result['id']}"
 
+    response["self"] = f"{request.host_url}businesses/{business_result['id']}"
+    
     return jsonify(response), 201
 
 if __name__ == '__main__':
