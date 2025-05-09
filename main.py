@@ -142,6 +142,21 @@ def create_business():
     
     return jsonify(response), 201
 
+@app.route('/businesses/<int:business_id>', methods=['GET'])
+def get_business_by_id(business_id):
+    select = sqlalchemy.text('SELECT * FROM business WHERE id = :id')
+    
+    with db.connect() as conn:
+        result = conn.execute(select, {'id': business_id})
+        business = result.mappings().fetchone()
+
+    if business is None:
+        return jsonify({'Error': 'No business with this business_id exists'}), 404
+
+    response = format_business_response(business)
+    response["self"] = f"{request.host_url.rstrip('/')}/businesses/{business['id']}"
+    return jsonify(response), 200
+
 if __name__ == '__main__':
     init_db()
     create_business_table(db)
