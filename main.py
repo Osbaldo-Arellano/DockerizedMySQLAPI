@@ -157,6 +157,84 @@ def get_business_by_id(business_id):
     response["self"] = f"{request.host_url.rstrip('/')}/businesses/{business['id']}"
     return jsonify(response), 200
 
+@app.route('/businesses', methods=['GET'])
+def get_businesses():
+    try:
+        limit = int(request.args.get('limit', 3))
+        offset = int(request.args.get('offset', 0))
+    except ValueError:
+        return jsonify({'Error': 'Invalid limit or offset'}), 400
+
+    select = sqlalchemy.text('SELECT * FROM business LIMIT :limit OFFSET :offset')
+    count_query = sqlalchemy.text('SELECT COUNT(*) FROM business')
+
+    with db.connect() as conn:
+        result = conn.execute(select, {'limit': limit, 'offset': offset})
+        businesses = result.mappings().fetchall()
+        total_count = conn.execute(count_query).scalar()  # get total number of businesses
+
+    entries = []
+    for business in businesses:
+        formatted = format_business_response(business)
+        formatted["self"] = f"{request.host_url}businesses/{business['id']}"
+        entries.append(formatted)
+
+    response = {'entries': entries}
+
+    # Add 'next' only if there are more records to fetch
+    if offset + limit < total_count:
+        next_offset = offset + limit
+        response['next'] = f"{request.host_url}businesses?offset={next_offset}&limit={limit}"
+
+    return jsonify(response), 200
+
+@app.route('/businesses/<int:business_id>', methods=['PUT'])
+def edit_business(business_id):
+    data = request.get_json()
+    required_fields = ['owner_id', 'name', 'street_address', 'city', 'state', 'zip_code']
+
+    # Check for missing required fields
+    if not data or not all(field in data for field in required_fields):
+        return jsonify({'Error': 'The request body is missing at least one of the required attributes'}), 400
+
+    select_query = sqlalchemy.text('SELECT * FROM business WHERE id = :id')
+    update_query = sqlalchemy.text('''
+        UPDATE business
+        SET owner_id = :owner_id,
+            name = :name,
+            street_address = :street_address,
+            city = :city,
+            state = :state,
+            zip_code = :zip_code
+        WHERE id = :id
+    ''')
+
+    with db.connect() as conn:
+        # Check if business exists
+        existing = conn.execute(select_query, {'id': business_id}).mappings().fetchone()
+        if not existing:
+            return jsonify({'Error': 'No business with this business_id exists'}), 404
+
+        # update
+        conn.execute(update_query, {**data, 'id': business_id})
+        conn.commit()
+
+        # Get update
+        updated = conn.execute(select_query, {'id': business_id}).mappings().fetchone()
+
+    response = {
+        "id": updated.id,
+        "owner_id": updated.owner_id,
+        "name": updated.name,
+        "street_address": updated.street_address,
+        "city": updated.city,
+        "state": updated.state,
+        "zip_code": updated.zip_code,
+        "self": f"{request.host_url}businesses/{updated.id}"
+    }
+
+    return jsonify(response), 200
+
 if __name__ == '__main__':
     init_db()
     create_business_table(db)
