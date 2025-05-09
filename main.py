@@ -69,10 +69,10 @@ def format_business_response(business_row):
     return {
         "id": int(business_row["id"]),
         "owner_id": int(business_row["owner_id"]), 
-        "name": business_row["name"],
-        "street_address": business_row["street_address"],
-        "city": business_row["city"],
-        "state": business_row["state"],
+        "name": str(business_row["name"]),
+        "street_address": str(business_row["street_address"]),
+        "city": str(business_row["city"]),
+        "state": str(business_row["state"]),
         "zip_code": int(business_row["zip_code"]), 
     }
 
@@ -193,7 +193,6 @@ def edit_business(business_id):
     data = request.get_json()
     required_fields = ['owner_id', 'name', 'street_address', 'city', 'state', 'zip_code']
 
-    # Check for missing required fields
     if not data or not all(field in data for field in required_fields):
         return jsonify({'Error': 'The request body is missing at least one of the required attributes'}), 400
 
@@ -222,18 +221,45 @@ def edit_business(business_id):
         # Get update
         updated = conn.execute(select_query, {'id': business_id}).mappings().fetchone()
 
-    response = {
-        "id": updated.id,
-        "owner_id": updated.owner_id,
-        "name": updated.name,
-        "street_address": updated.street_address,
-        "city": updated.city,
-        "state": updated.state,
-        "zip_code": updated.zip_code,
-        "self": f"{request.host_url}businesses/{updated.id}"
-    }
+    response = format_business_response(updated)
+    response["self"] = f"{request.host_url.rstrip('/')}/businesses/{updated['id']}"
 
     return jsonify(response), 200
+
+@app.route('/businesses/<int:business_id>', methods=['DELETE'])
+def delete_business(business_id):
+    select_query = sqlalchemy.text('SELECT * FROM business WHERE id = :id')
+    delete_reviews_query = sqlalchemy.text('DELETE FROM review WHERE business_id = :business_id')
+    delete_business_query = sqlalchemy.text('DELETE FROM business WHERE id = :id')
+
+    with db.connect() as conn:
+        # Check if the business exists
+        result = conn.execute(select_query, {'id': business_id}).mappings().fetchone()
+        if not result:
+            return jsonify({'Error': 'No business with this business_id exists'}), 404
+
+        # Delete reviews and the business
+        conn.execute(delete_reviews_query, {'business_id': business_id})
+        conn.execute(delete_business_query, {'id': business_id})
+        conn.commit()
+
+    return '', 204
+
+@app.route('/owners/<int:owner_id>/businesses', methods=['GET'])
+def list_owner_businesses(owner_id):
+    query = sqlalchemy.text('SELECT * FROM business WHERE owner_id = :owner_id')
+
+    with db.connect() as conn:
+        result = conn.execute(query, {'owner_id': owner_id})
+        businesses = result.mappings().fetchall()
+
+    business_list = []
+    for business in businesses:
+        business_dict = dict(business)
+        business_dict["self"] = f"{request.host_url.rstrip('/')}/businesses/{business_dict['id']}"
+        business_list.append(business_dict)
+
+    return jsonify(business_list), 200
 
 if __name__ == '__main__':
     init_db()
