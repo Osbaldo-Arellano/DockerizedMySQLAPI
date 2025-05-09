@@ -1,6 +1,7 @@
 from __future__ import annotations
 from flask import Flask, request, jsonify, url_for
 from connect_connector import connect_with_connector
+from sqlalchemy.exc import IntegrityError
 
 import logging
 import os
@@ -75,15 +76,15 @@ def format_business_response(business_row):
         "state": str(business_row["state"]),
         "zip_code": int(business_row["zip_code"]), 
     }
-
-
 def format_review_response(review):
+    base_url = request.host_url.rstrip('/')
     return {
-        'id': review.id,
-        'user_id': review.user_id,
-        'business_id': review.business_id,
-        'stars': review.stars,
-        'review_text': review.review_text
+        'id': int(review['id']),
+        'user_id': int(review['user_id']),
+        'business': f"{base_url}/businesses/{review['business_id']}",
+        'stars': int(review['stars']),
+        'review_text': review.get('review_text'),
+        'self': f"{base_url}/reviews/{review['id']}"
     }
 
 @app.route('/', methods=['GET'])
@@ -260,6 +261,130 @@ def list_owner_businesses(owner_id):
         business_list.append(business_dict)
 
     return jsonify(business_list), 200
+
+@app.route('/reviews', methods=['POST'])
+def create_review():
+    data = request.get_json()
+    required_fields = ['user_id', 'business_id', 'stars']
+    if not all(field in data for field in required_fields):
+        return jsonify({'Error': 'The request body is missing at least one of the required attributes'}), 400
+
+    business_check = sqlalchemy.text('SELECT * FROM business WHERE id = :bid')
+    with db.connect() as conn:
+        business = conn.execute(business_check, {'bid': data['business_id']}).fetchone()
+        if not business:
+            return jsonify({'Error': 'No business with this business_id exists'}), 404
+
+        review_check = sqlalchemy.text(
+            'SELECT * FROM review WHERE user_id = :uid AND business_id = :bid'
+        )
+        existing = conn.execute(review_check, {
+            'uid': data['user_id'],
+            'bid': data['business_id']
+        }).fetchone()
+
+        if existing:
+            return jsonify({
+                'Error': 'You have already submitted a review for this business. You can update your previous review, or delete it and submit a new review'
+            }), 409
+
+        insert = sqlalchemy.text(
+            '''
+            INSERT INTO review (user_id, business_id, stars, review_text)
+            VALUES (:uid, :bid, :stars, :review_text)
+            '''
+            )
+        conn.execute(insert, {
+            'uid': data['user_id'],
+            'bid': data['business_id'],
+            'stars': data['stars'],
+            'review_text': data.get('review_text')
+        })
+
+        conn.commit()
+
+        review_id = conn.execute(sqlalchemy.text('SELECT LAST_INSERT_ID()')).scalar()
+
+        new_review = conn.execute(
+            sqlalchemy.text('SELECT * FROM review WHERE id = :id'),
+            {'id': review_id}
+        ).mappings().fetchone()
+
+        response = format_review_response(new_review)
+
+        return jsonify(response), 201
+
+
+@app.route('/reviews/<review_id>', methods=['GET'])
+def get_review(review_id):
+    try:
+        review_id = int(review_id)
+    except ValueError:
+        return jsonify({'Error': 'review_id must be an integer'}), 200
+
+    query = sqlalchemy.text('SELECT * FROM review WHERE id = :id')
+    with db.connect() as conn:
+        review = conn.execute(query, {'id': review_id}).mappings().fetchone()
+
+    if not review:
+        return jsonify({'Error': 'No review with this review_id exists'}), 404
+
+    return jsonify(format_review_response(review)), 200
+
+
+@app.route('/reviews/<int:review_id>', methods=['PUT'])
+def edit_review(review_id):
+    data = request.get_json()
+    if 'stars' not in data and 'review_text' not in data:
+        return jsonify({'Error': 'The request body is missing at least one of the required attributes'}), 400
+
+    with db.connect() as conn:
+        check = sqlalchemy.text('SELECT * FROM review WHERE id = :id')
+        review = conn.execute(check, {'id': review_id}).mappings().fetchone()
+
+        if not review:
+            return jsonify({'Error': 'No review with this review_id exists'}), 404
+
+        update = sqlalchemy.text('''
+            UPDATE review SET
+                stars = COALESCE(:stars, stars),
+                review_text = COALESCE(:review_text, review_text)
+            WHERE id = :id
+        ''')
+        conn.execute(update, {
+            'stars': data.get('stars'),
+            'review_text': data.get('review_text'),
+            'id': review_id
+        })
+
+        updated_review = conn.execute(
+            sqlalchemy.text('SELECT * FROM review WHERE id = :id'),
+            {'id': review_id}
+        ).mappings().fetchone()
+
+        return jsonify(format_review_response(updated_review)), 200
+
+
+@app.route('/reviews/<int:review_id>', methods=['DELETE'])
+def delete_review(review_id):
+    with db.connect() as conn:
+        check = sqlalchemy.text('SELECT * FROM review WHERE id = :id')
+        review = conn.execute(check, {'id': review_id}).fetchone()
+
+        if not review:
+            return jsonify({'Error': 'No review with this review_id exists'}), 404
+
+        conn.execute(sqlalchemy.text('DELETE FROM review WHERE id = :id'), {'id': review_id})
+        return '', 204
+
+
+@app.route('/users/<int:user_id>/reviews', methods=['GET'])
+def list_user_reviews(user_id):
+    query = sqlalchemy.text('SELECT * FROM review WHERE user_id = :uid')
+    with db.connect() as conn:
+        result = conn.execute(query, {'uid': user_id}).mappings().fetchall()
+
+    return jsonify([format_review_response(r) for r in result]), 200
 
 if __name__ == '__main__':
     init_db()
